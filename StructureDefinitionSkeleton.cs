@@ -20,5 +20,8 @@ namespace fhir_invariant_tester
         public string key { get; set; }
         public string context { get; set; }
         public string expression { get; set; }
+        public int successCount { get; set; }
+        public int failCount { get; set; }
+        public int errorCount { get; set; }
     }
 }
