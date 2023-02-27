@@ -31,6 +31,12 @@ namespace fhir_invariant_tester
             // now scan all the test files!
             var symbols = new SymbolTable(FhirPathCompiler.DefaultSymbolTable);
             symbols.AddFhirExtensions();
+            symbols.Add("resolve", (IEnumerable<ITypedElement> f, EvaluationContext ctx) => f.Select(fi => resolver(fi, ctx)), doNullProp: false);
+            static ITypedElement resolver(ITypedElement f, EvaluationContext ctx)
+            {
+                return ctx is FhirEvaluationContext fctx ? f.Resolve(fctx.ElementResolver) : f.Resolve();
+            }
+
             FhirPathCompiler fpc = new FhirPathCompiler(symbols);
 
 
@@ -59,75 +65,19 @@ namespace fhir_invariant_tester
                         if (file.Contains("-notes"))
                             continue;
                         if (file.Contains("-search-params.xml"))
-                            continue; // 
+                            continue; // These have some issues due to no type property value (or if there missing other values - fullURL mostly)
 
-                        // Load the file
-                        var xml = File.ReadAllText(file);
-                        if (!string.IsNullOrEmpty(xml))
+                        TestExampleForInvariants(sd, directory, file, skipFiles, fpc, true);
+                    }
+
+                    // Now scan for any test files in the examples folder (unit test resources)
+                    if (Path.Exists(Path.Combine(directory, "source", sd.ResourceType, "invariant-tests")))
+                    {
+                        foreach (var file in Directory.GetFiles(Path.Combine(directory, "source", sd.ResourceType, "invariant-tests"), $"*.xml")
+                            .Union(Directory.GetFiles(Path.Combine(directory, "source", sd.ResourceType, "invariant-tests"), $"*.json")))
                         {
-                            try
-                            {
-                                var node = FhirXmlNode.Parse(xml);
-                                if (skipFiles.Contains(node.Name))
-                                    continue;
-
-                                if (sd.IsProfile)
-                                {
-                                    continue; // skipping profiles for now
-                                }
-
-                                Console.WriteLine();
-                                Console.WriteLine($"{node.Name}/{node.Children("id").FirstOrDefault()?.Text}  {file.Replace(directory, "")}");
-
-                                var te = node.ToTypedElement(_provider, null, new TypedElementSettings() { ErrorMode = TypedElementSettings.TypeErrorMode.Passthrough });
-                                var context = new FhirEvaluationContext(te);
-                                context.ElementResolver = FakeResolver;
-
-                                // Now test each of the invariants on the resource
-                                foreach (var inv in sd.Invariants)
-                                {
-                                    try
-                                    {
-                                        var contexts = new List<ITypedElement>();
-                                        if (string.IsNullOrEmpty(inv.context) || inv.context == sd.ResourceType)
-                                        {
-                                            contexts.Add(te);
-                                        }
-                                        else
-                                        {
-                                            var exprContext = fpc.Compile(inv.context);
-                                            contexts.AddRange(exprContext(te, context));
-                                        }
-
-                                        foreach (var contextValue in contexts)
-                                        {
-                                            var expr = fpc.Compile(inv.expression);
-                                            var result = expr(contextValue, context);
-                                            if (result.Count() == 1 && result.First().Value is bool b && b)
-                                            {
-                                                // Console.WriteLine($"  {inv.key}({inv.severity})  {inv.context}  {inv.expression}  {result.First().Value}");
-                                                inv.successCount++;
-                                            }
-                                            else
-                                            {
-                                                Console.WriteLine($"  {inv.key}({inv.severity})  {inv.context}  {inv.expression}  {result.FirstOrDefault()?.Value ?? "(null)"}");
-                                                inv.failCount++;
-                                            }
-                                        }
-                                    }
-                                    catch (Exception ex)
-                                    {
-                                        Console.ForegroundColor = ConsoleColor.Red;
-                                        Console.WriteLine($"  {inv.key}({inv.severity})  {inv.context}  {inv.expression}  {ex.Message}");
-                                        inv.errorCount++;
-                                        Console.ForegroundColor = ConsoleColor.White;
-                                    }
-                                }
-                            }
-                            catch (FormatException)
-                            {
-                                Console.WriteLine($"nope... {file.Replace(directory, "")}");
-                            }
+                            string key = Path.GetFileNameWithoutExtension(file);
+                            TestExampleForInvariants(sd, directory, file, skipFiles, fpc, !key.EndsWith(".fail"));
                         }
                     }
                 }
@@ -146,18 +96,29 @@ namespace fhir_invariant_tester
                 if (sd.IsDataType) continue;
                 foreach (var inv in sd.Invariants)
                 {
+                    if (inv.errorCount > 0)
+                        Console.ForegroundColor = ConsoleColor.Red;
                     Console.WriteLine($"  {sd.ResourceType}\t\t{inv.key}({inv.severity})\t{inv.successCount}/{inv.failCount}/{inv.errorCount}\t\t{(sd.IsProfile ? $"(profile - {sd.CanonicalUrl})" : "")}");
-                    inv.successCount++;
+                    Console.ForegroundColor = ConsoleColor.White;
                 }
             }
         }
 
-        private static ITypedElement FakeResolver(string reference)
+        private static ITypedElement FakeResolver(string reference, ISourceNode root)
         {
             // Fake implementation of this
             if (string.IsNullOrEmpty(reference)) return null;
             var ri = new Hl7.Fhir.Rest.ResourceIdentity(reference);
-            if (!string.IsNullOrEmpty(ri.ResourceType))
+            if (reference.StartsWith("#"))
+            {
+                // See if there is a contained resource with it inside
+                foreach (var child in root.Children("contained"))
+                {
+                    if (child.Children("id").FirstOrDefault()?.Text == reference.Substring(1))
+                        return child.ToTypedElement(_provider);
+                }
+            }
+            else if (!string.IsNullOrEmpty(ri.ResourceType))
             {
                 var dummyNode = FhirXmlNode.Parse($"<{ri.ResourceType} xmlns=\"http://hl7.org/fhir\"><id value=\"{ri.Id}\"/></{ri.ResourceType}>");
                 return dummyNode.ToTypedElement(_provider);
@@ -220,6 +181,100 @@ namespace fhir_invariant_tester
                     {
                         Console.WriteLine($"nope... {file.Replace(directory, "")}");
                     }
+                }
+            }
+        }
+
+        private static void TestExampleForInvariants(StructureDefinitionSkeleton sd, string directory, string file, string[] skipFiles, FhirPathCompiler fpc, bool expectSuccess)
+        {
+            var content = File.ReadAllText(file);
+            if (!string.IsNullOrEmpty(content))
+            {
+                try
+                {
+                    ISourceNode node;
+                    if (file.EndsWith(".xml"))
+                        node = FhirXmlNode.Parse(content);
+                    else
+                        node = FhirJsonNode.Parse(content);
+                    if (skipFiles.Contains(node.Name))
+                        return;
+
+                    if (sd.IsProfile)
+                    {
+                        return; // skipping profiles for now
+                    }
+
+                    Console.WriteLine();
+                    Console.WriteLine($"{node.Name}/{node.Children("id").FirstOrDefault()?.Text}  {file.Replace(directory, "")}");
+
+                    var te = node.ToTypedElement(_provider, null, new TypedElementSettings() { ErrorMode = TypedElementSettings.TypeErrorMode.Passthrough });
+                    var context = new FhirEvaluationContext(te);
+                    context.ElementResolver = (string reference) => FakeResolver(reference, node);
+
+                    string key = Path.GetFileNameWithoutExtension(file);
+                    bool specificInvariantTest = (key.EndsWith("fail") || key.EndsWith("pass")) && sd.Invariants.Any(i => key.StartsWith(i.key));
+
+                    // Now test each of the invariants on the resource
+                    foreach (var inv in sd.Invariants)
+                    {
+                        if (specificInvariantTest && !key.StartsWith(inv.key))
+                            continue;
+                        try
+                        {
+                            var contexts = new List<ITypedElement>();
+                            if (string.IsNullOrEmpty(inv.context) || inv.context == sd.ResourceType)
+                            {
+                                contexts.Add(te);
+                            }
+                            else
+                            {
+                                var exprContext = fpc.Compile(inv.context);
+                                contexts.AddRange(exprContext(te, context));
+                            }
+
+                            foreach (var contextValue in contexts)
+                            {
+                                var expr = fpc.Compile(inv.expression);
+                                var result = expr(contextValue, context);
+                                if (result.Count() == 1 && result.First().Value is bool b && b)
+                                {
+                                    if (expectSuccess)
+                                        inv.successCount++;
+                                    else
+                                    {
+                                        Console.ForegroundColor = ConsoleColor.Magenta;
+                                        Console.WriteLine($"  {inv.key}({inv.severity})  {inv.context}  {inv.expression}  {result.First().Value}");
+                                        inv.errorCount++;
+                                        Console.ForegroundColor = ConsoleColor.White;
+                                    }
+                                }
+                                else
+                                {
+                                    if (!expectSuccess)
+                                        inv.failCount++;
+                                    else
+                                    {
+                                        Console.ForegroundColor = ConsoleColor.Magenta;
+                                        Console.WriteLine($"  {inv.key}({inv.severity})  {inv.context}  {inv.expression}  {result.FirstOrDefault()?.Value ?? "(null)"}");
+                                        inv.errorCount++;
+                                        Console.ForegroundColor = ConsoleColor.White;
+                                    }
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.ForegroundColor = ConsoleColor.Red;
+                            Console.WriteLine($"  {inv.key}({inv.severity})  {inv.context}  {inv.expression}  {ex.Message}");
+                            inv.errorCount++;
+                            Console.ForegroundColor = ConsoleColor.White;
+                        }
+                    }
+                }
+                catch (FormatException)
+                {
+                    Console.WriteLine($"nope... {file.Replace(directory, "")}");
                 }
             }
         }
