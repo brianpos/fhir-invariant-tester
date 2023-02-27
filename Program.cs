@@ -11,12 +11,32 @@ namespace fhir_invariant_tester
     internal class Program
     {
         static IStructureDefinitionSummaryProvider _provider;
-        static void Main(string[] args)
+        static int Main(string[] args)
         {
             Console.WriteLine("FHIR R5 Invariant tester!");
+            Console.WriteLine("---------------------------------------------------------------");
+            if (args.Length == 0)
+            {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine("Requires the FHIR specification git folder on the local disk to be provided as an argument");
+                Console.ForegroundColor = ConsoleColor.White;
+                Console.WriteLine("Usage:");
+                Console.WriteLine("dotnet fhir-invariant-tester /git/hl7/fhir");
+                Console.WriteLine("Optionally provide the resource Type to filter things");
+                Console.WriteLine("dotnet fhir-invariant-tester /git/hl7/fhir Account");
+                return -1;
+            }
 
             // Scan over all the files in the specification folder (arg[0]) to find all the Profile definitions.
             string directory = args[0];
+            string resourceType = null;
+            Console.WriteLine($"Testing FHIR source folder:\t{directory}");
+            if (args.Length > 1)
+            {
+                resourceType = args[1];
+                Console.WriteLine($"Filtering to resource Type:\t{resourceType}");
+            }
+
             List<StructureDefinitionSkeleton> sds;
             int totalInvariants;
             ScanAllInvariantsInSpecification(Path.Combine(directory, "publish"), out sds, out totalInvariants);
@@ -36,9 +56,7 @@ namespace fhir_invariant_tester
             {
                 return ctx is FhirEvaluationContext fctx ? f.Resolve(fctx.ElementResolver) : f.Resolve();
             }
-
             FhirPathCompiler fpc = new FhirPathCompiler(symbols);
-
 
             var source = new CachedResolver(new SpecSourceStructureDefinitionResolver(sds));
             _provider = new Hl7.Fhir.Specification.StructureDefinitionSummaryProvider(source);
@@ -47,7 +65,10 @@ namespace fhir_invariant_tester
             var skipFiles = new[] { "Workbook", "div" };
             foreach (var sd in sds)
             {
-                if (sd.IsDataType) continue;
+                if (!string.IsNullOrEmpty(resourceType) && sd.ResourceType != resourceType)
+                    continue; // commandline has filtered out this resource type
+                if (sd.IsDataType) 
+                    continue; // no checking of datatype level invariants at this stage
 
                 if (!sd.Invariants.Any())
                     continue; // no point checking for test examples if there are no invariants
@@ -93,6 +114,8 @@ namespace fhir_invariant_tester
             Console.WriteLine("");
             foreach (var sd in sds)
             {
+                if (!string.IsNullOrEmpty(resourceType) && sd.ResourceType != resourceType)
+                    continue; // commandline has filtered out this resource type
                 if (sd.IsDataType) continue;
                 foreach (var inv in sd.Invariants)
                 {
@@ -102,6 +125,7 @@ namespace fhir_invariant_tester
                     Console.ForegroundColor = ConsoleColor.White;
                 }
             }
+            return 0;
         }
 
         private static ITypedElement FakeResolver(string reference, ISourceNode root)
@@ -244,30 +268,61 @@ namespace fhir_invariant_tester
 
                             var allTrue = results.All(v => v == true);
                             var anyFail = results.Any(v => v == false || !v.HasValue);
-                            foreach (var result in results)
+
+                            if (specificInvariantTest)
                             {
-                                if (result == true)
+                                if (expectSuccess)
                                 {
-                                    if (expectSuccess)
+                                    if (allTrue && results.Count() > 0)
                                         inv.successCount++;
-                                    else if (!anyFail)
+                                    else
                                     {
                                         Console.ForegroundColor = ConsoleColor.Magenta;
-                                        Console.WriteLine($"  {inv.key}({inv.severity})  {inv.context}  {inv.expression}  {result?.ToString() ?? "(null)"}");
+                                        Console.WriteLine($"  {inv.key}({inv.severity})  {inv.context}  {inv.expression}");
                                         inv.errorCount++;
                                         Console.ForegroundColor = ConsoleColor.White;
                                     }
                                 }
                                 else
                                 {
-                                    if (!expectSuccess || (!specificInvariantTest && inv.severity == "warning"))
+                                    if (anyFail && results.Count() > 0)
                                         inv.failCount++;
                                     else
                                     {
                                         Console.ForegroundColor = ConsoleColor.Magenta;
-                                        Console.WriteLine($"  {inv.key}({inv.severity})  {inv.context}  {inv.expression}  {result?.ToString() ?? "(null)"}");
+                                        Console.WriteLine($"  {inv.key}({inv.severity})  {inv.context}  {inv.expression}");
                                         inv.errorCount++;
                                         Console.ForegroundColor = ConsoleColor.White;
+                                    }
+                                }
+                            }
+                            else
+                            {
+                                foreach (var result in results)
+                                {
+                                    if (result == true)
+                                    {
+                                        if (expectSuccess)
+                                            inv.successCount++;
+                                        else if (!anyFail)
+                                        {
+                                            Console.ForegroundColor = ConsoleColor.Magenta;
+                                            Console.WriteLine($"  {inv.key}({inv.severity})  {inv.context}  {inv.expression}  {result?.ToString() ?? "(null)"}");
+                                            inv.errorCount++;
+                                            Console.ForegroundColor = ConsoleColor.White;
+                                        }
+                                    }
+                                    else
+                                    {
+                                        if (!expectSuccess || (!specificInvariantTest && inv.severity == "warning"))
+                                            inv.failCount++;
+                                        else
+                                        {
+                                            Console.ForegroundColor = ConsoleColor.Magenta;
+                                            Console.WriteLine($"  {inv.key}({inv.severity})  {inv.context}  {inv.expression}  {result?.ToString() ?? "(null)"}");
+                                            inv.errorCount++;
+                                            Console.ForegroundColor = ConsoleColor.White;
+                                        }
                                     }
                                 }
                             }

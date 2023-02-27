@@ -2,10 +2,11 @@
 This utility can be used to test all sample files in the fhir specification against 
 invariants defined in their core StructureDefinition.
 
-The only commandline parameter to the tool is the path to the core specification git repo loaded locally.
+The commandline parameter to the tool is the path to the core specification git repo loaded locally.
 You must have sucessfully build the spec in order to run the tester as it uses
 the snapshots in the structure definitions in the publish folder to provide type
 information to the FHIRPath engine.
+A second optional parameter is to be able to filter down to just a single resource type
 
 It will look inside the following folders:
 * `publish/*.profile.xml` - StructureDefinitions generated containing snapshots
@@ -13,7 +14,7 @@ It will look inside the following folders:
 * `source/(resourceType)/invariant-tests/(invariantKey).[*.](pass|fail).(xml|json)` - test files that pass or fail the specified invariant
 
 ``` cmd
-> dotnet fhir-invariant-tester /git/hl7/fhir
+> dotnet fhir-invariant-tester /git/hl7/fhir Account
 ```
 
 The output reports the list of files that were tested, output from any invariants that didn't evaluate as anticipated.
