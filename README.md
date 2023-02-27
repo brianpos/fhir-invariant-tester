@@ -20,8 +20,23 @@ The output reports the list of files that were tested, output from any invariant
 
 Then a simple list of the invariants and pass/fail/unexpected outcome.
 
-> Note: at this stage there are 2 known issues with this implementation, it does not 
-have the terminology `memberOf` function implemented (so get a few errors with that) and the 
-`evv-2` invariant has no expression, is known to be invalid.
-The implementation of the `resolve()` method only resolves a contained resource or fakes the existence of the resource
+``` txt
+  RiskAssessment        ras-2(error)    10/0/2
+  RiskAssessment        ras-1(error)    0/0/0
+  SearchParameter       cnl-0(warning)  5/0/0
+  SearchParameter       spd-1(error)    5/0/0
+  SearchParameter       spd-2(error)    5/0/0
+  SearchParameter       spd-3(error)    5/0/0
+  SearchParameter       cnl-1(warning)  5/0/0
+  ServiceRequest        bdystr-1(error) 18/0/0
+  ServiceRequest        prr-1(error)    18/0/0
+  CodeSystem            scs-1(error)    0/0/0     (profile - http://hl7.org/fhir/StructureDefinition/shareablecodesystem)
+  CodeSystem            scs-2(error)    0/0/0     (profile - http://hl7.org/fhir/StructureDefinition/shareablecodesystem)
+```
+
+## Known Issues
+* the terminology `memberOf` function is not implemented (so get a few errors with that)
+* the `evv-2` invariant has no expression, is known to be invalid.
+* the `resolve()` method only resolves a contained resource or fakes the existence of the resource
 with the ID specified if it's there. (really only suitable when you want to test it's type as is done with search parameters)
+* profile invariants are not tested (though it does detect them but reports no results - future work)
