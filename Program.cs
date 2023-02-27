@@ -1,6 +1,7 @@
 ﻿using Hl7.Fhir.ElementModel;
 using Hl7.Fhir.FhirPath;
 using Hl7.Fhir.Serialization;
+using Hl7.Fhir.Specification;
 using Hl7.Fhir.Specification.Source;
 using Hl7.FhirPath;
 using Hl7.FhirPath.Expressions;
@@ -9,6 +10,7 @@ namespace fhir_invariant_tester
 {
     internal class Program
     {
+        static IStructureDefinitionSummaryProvider _provider;
         static void Main(string[] args)
         {
             Console.WriteLine("FHIR R5 Invariant tester!");
@@ -27,22 +29,13 @@ namespace fhir_invariant_tester
             Console.WriteLine("");
 
             // now scan all the test files!
-            static ITypedElement resolver(ITypedElement f, EvaluationContext ctx)
-            {
-                return ctx is FhirEvaluationContext fctx ? f.Resolve(fctx.ElementResolver) : f.Resolve();
-            }
             var symbols = new SymbolTable(FhirPathCompiler.DefaultSymbolTable);
-            //symbols.Add("hasValue", (ITypedElement f) => f.HasValue(), doNullProp: false);
-            //symbols.Add("resolve", (ITypedElement f, EvaluationContext ctx) => resolver(f, ctx), doNullProp: false);
             symbols.AddFhirExtensions();
-            //symbols.Add("resolve", (ITypedElement focus) => { return focus; });
-            //symbols.Add("hasValue", (ITypedElement focus) => { return focus?.HasValue(); });
-            //symbols.Add("memberOf", (ITypedElement focus, string url) => { Console.WriteLine(url); return focus?.HasValue(); });
             FhirPathCompiler fpc = new FhirPathCompiler(symbols);
 
 
             var source = new CachedResolver(new SpecSourceStructureDefinitionResolver(sds));
-            var sdsp = new Hl7.Fhir.Specification.StructureDefinitionSummaryProvider(source);
+            _provider = new Hl7.Fhir.Specification.StructureDefinitionSummaryProvider(source);
 
             // Parse all the files directly in the source folder of each resource type (known succeeding resources).
             var skipFiles = new[] { "Workbook", "div" };
@@ -86,20 +79,9 @@ namespace fhir_invariant_tester
                                 Console.WriteLine();
                                 Console.WriteLine($"{node.Name}/{node.Children("id").FirstOrDefault()?.Text}  {file.Replace(directory, "")}");
 
-                                var te = new ScopedNode(node.ToTypedElement(sdsp, null, new TypedElementSettings() { ErrorMode = TypedElementSettings.TypeErrorMode.Passthrough }));
+                                var te = node.ToTypedElement(_provider, null, new TypedElementSettings() { ErrorMode = TypedElementSettings.TypeErrorMode.Passthrough });
                                 var context = new FhirEvaluationContext(te);
-                                context.ElementResolver = (string reference) =>
-                                {
-                                    // Fake implementation of this
-                                    if (string.IsNullOrEmpty(reference)) return null;
-                                    var ri = new Hl7.Fhir.Rest.ResourceIdentity(reference);
-                                    if (!string.IsNullOrEmpty(ri.ResourceType))
-                                    {
-                                        var dummyNode = FhirXmlNode.Parse($"<{ri.ResourceType} xmlns=\"http://hl7.org/fhir\"><id value=\"{ri.Id}\"/></{ri.ResourceType}>");
-                                        return new ScopedNode(dummyNode.ToTypedElement(sdsp));
-                                    }
-                                    return null;
-                                };
+                                context.ElementResolver = FakeResolver;
 
                                 // Now test each of the invariants on the resource
                                 foreach (var inv in sd.Invariants)
@@ -154,12 +136,6 @@ namespace fhir_invariant_tester
                 }
             }
 
-            //var sds = Directory.GetFiles(args[0], "*.xml", SearchOption.AllDirectories);
-            //var files = Directory.GetFiles(args[0], "*.json", SearchOption.AllDirectories).Union(Directory.GetFiles(args[0], "*.xml", SearchOption.AllDirectories));
-            //var node2 = FhirJsonNode.Parse(file);
-            //Dictionary<string, object> values = new Dictionary<string, object>();
-            //node.HarvestValues(values, "", "");
-
             Console.WriteLine("");
             Console.WriteLine("---------------------------------------------------------------");
             Console.WriteLine($"Results");
@@ -170,10 +146,23 @@ namespace fhir_invariant_tester
                 if (sd.IsDataType) continue;
                 foreach (var inv in sd.Invariants)
                 {
-                    Console.WriteLine($"  {sd.ResourceType}\t\t{inv.key}({inv.severity})\t{inv.successCount}/{inv.failCount}/{inv.errorCount}\t\t{(sd.IsProfile ? "(profile)" : "")}");
+                    Console.WriteLine($"  {sd.ResourceType}\t\t{inv.key}({inv.severity})\t{inv.successCount}/{inv.failCount}/{inv.errorCount}\t\t{(sd.IsProfile ? $"(profile - {sd.CanonicalUrl})" : "")}");
                     inv.successCount++;
                 }
             }
+        }
+
+        private static ITypedElement FakeResolver(string reference)
+        {
+            // Fake implementation of this
+            if (string.IsNullOrEmpty(reference)) return null;
+            var ri = new Hl7.Fhir.Rest.ResourceIdentity(reference);
+            if (!string.IsNullOrEmpty(ri.ResourceType))
+            {
+                var dummyNode = FhirXmlNode.Parse($"<{ri.ResourceType} xmlns=\"http://hl7.org/fhir\"><id value=\"{ri.Id}\"/></{ri.ResourceType}>");
+                return dummyNode.ToTypedElement(_provider);
+            }
+            return null;
         }
 
         private static void ScanAllInvariantsInSpecification(string directory, out List<StructureDefinitionSkeleton> sds, out int totalInvariants)
