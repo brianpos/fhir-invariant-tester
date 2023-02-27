@@ -233,30 +233,39 @@ namespace fhir_invariant_tester
                                 contexts.AddRange(exprContext(te, context));
                             }
 
-                            foreach (var contextValue in contexts)
+                            var expr = fpc.Compile(inv.expression);
+
+                            var results = contexts.Select(contextValue => 
                             {
-                                var expr = fpc.Compile(inv.expression);
                                 var result = expr(contextValue, context);
-                                if (result.Count() == 1 && result.First().Value is bool b && b)
+                                if (!result.Any()) return (bool?)null;
+                                return (result.Count() == 1 && result.First().Value is bool b && b); 
+                            }).ToArray();
+
+                            var allTrue = results.All(v => v == true);
+                            var anyFail = results.Any(v => v == false || !v.HasValue);
+                            foreach (var result in results)
+                            {
+                                if (result == true)
                                 {
                                     if (expectSuccess)
                                         inv.successCount++;
-                                    else
+                                    else if (!anyFail)
                                     {
                                         Console.ForegroundColor = ConsoleColor.Magenta;
-                                        Console.WriteLine($"  {inv.key}({inv.severity})  {inv.context}  {inv.expression}  {result.First().Value}");
+                                        Console.WriteLine($"  {inv.key}({inv.severity})  {inv.context}  {inv.expression}  {result?.ToString() ?? "(null)"}");
                                         inv.errorCount++;
                                         Console.ForegroundColor = ConsoleColor.White;
                                     }
                                 }
                                 else
                                 {
-                                    if (!expectSuccess)
+                                    if (!expectSuccess || (!specificInvariantTest && inv.severity == "warning"))
                                         inv.failCount++;
                                     else
                                     {
                                         Console.ForegroundColor = ConsoleColor.Magenta;
-                                        Console.WriteLine($"  {inv.key}({inv.severity})  {inv.context}  {inv.expression}  {result.FirstOrDefault()?.Value ?? "(null)"}");
+                                        Console.WriteLine($"  {inv.key}({inv.severity})  {inv.context}  {inv.expression}  {result?.ToString() ?? "(null)"}");
                                         inv.errorCount++;
                                         Console.ForegroundColor = ConsoleColor.White;
                                     }
