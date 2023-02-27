@@ -2,7 +2,7 @@
   "profiles": {
     "fhir-invariant-tester": {
       "commandName": "Project",
-      "commandLineArgs": "E:\\git\\HL7\\take3-core-r5\\source"
+      "commandLineArgs": "E:\\git\\HL7\\take3-core-r5"
     }
   }
 }
