@@ -25,6 +25,10 @@ The output reports the list of files that were tested, output from any invariant
 
 Then a simple list of the invariants and pass/fail/unexpected outcome.
 
+Once the results are displayed the utility will monitor the files that it processed for changes to the examples/unit tests and will 
+re-evaluate the resource type if a change is detected.
+Press Ctrl+C to close the application/stop tracking the files.
+
 ``` txt
   RiskAssessment        ras-2(error)    10/0/2
   RiskAssessment        ras-1(error)    0/0/0
