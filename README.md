@@ -6,7 +6,10 @@ The commandline parameter to the tool is the path to the core specification git 
 You must have sucessfully build the spec in order to run the tester as it uses
 the snapshots in the structure definitions in the publish folder to provide type
 information to the FHIRPath engine.
+
 A second optional parameter is to be able to filter down to just a single resource type
+(if you provide this optional resource type value, and there is no `invariant-tests` folder, 
+then the tool will create it and copy in default test files for each invariant to edit)
 
 It will look inside the following folders:
 * `publish/*.profile.xml` - StructureDefinitions generated containing snapshots
