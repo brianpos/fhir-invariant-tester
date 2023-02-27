@@ -22,9 +22,9 @@ namespace fhir_invariant_tester
                 Console.WriteLine("Requires the FHIR specification git folder on the local disk to be provided as an argument");
                 Console.ForegroundColor = ConsoleColor.White;
                 Console.WriteLine("Usage:");
-                Console.WriteLine("dotnet fhir-invariant-tester /git/hl7/fhir");
+                Console.WriteLine("dotnet run --project fhir-invariant-tester.csproj /mnt/e/git/HL7/take3-core-r5");
                 Console.WriteLine("Optionally provide the resource Type to filter things");
-                Console.WriteLine("dotnet fhir-invariant-tester /git/hl7/fhir Account");
+                Console.WriteLine("dotnet run --project fhir-invariant-tester.csproj /git/hl7/fhir Account");
                 return -1;
             }
 
