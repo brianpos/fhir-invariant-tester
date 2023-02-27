@@ -5,6 +5,7 @@ using Hl7.Fhir.Specification;
 using Hl7.Fhir.Specification.Source;
 using Hl7.FhirPath;
 using Hl7.FhirPath.Expressions;
+using System.IO;
 
 namespace fhir_invariant_tester
 {
@@ -63,48 +64,10 @@ namespace fhir_invariant_tester
 
             // Parse all the files directly in the source folder of each resource type (known succeeding resources).
             var skipFiles = new[] { "Workbook", "div" };
+            Dictionary<string, StructureDefinitionSkeleton> monitorFileChanges = new(StringComparer.OrdinalIgnoreCase);
             foreach (var sd in sds)
             {
-                if (!string.IsNullOrEmpty(resourceType) && sd.ResourceType != resourceType)
-                    continue; // commandline has filtered out this resource type
-                if (sd.IsDataType) 
-                    continue; // no checking of datatype level invariants at this stage
-
-                if (!sd.Invariants.Any())
-                    continue; // no point checking for test examples if there are no invariants
-                try
-                {
-                    foreach (var file in Directory.GetFiles(Path.Combine(directory, "source", sd.ResourceType), $"{sd.ResourceType.ToLower()}-*.xml"))
-                    {
-                        // skip some files
-                        if (file.Contains("Archive"))
-                            continue;
-                        if (file.Contains("-examples-header"))
-                            continue;
-                        if (file.Contains("-introduction"))
-                            continue;
-                        if (file.Contains("-notes"))
-                            continue;
-                        if (file.Contains("-search-params.xml"))
-                            continue; // These have some issues due to no type property value (or if there missing other values - fullURL mostly)
-
-                        TestExampleForInvariants(sd, directory, file, skipFiles, fpc, true);
-                    }
-
-                    // Now scan for any test files in the examples folder (unit test resources)
-                    if (Path.Exists(Path.Combine(directory, "source", sd.ResourceType, "invariant-tests")))
-                    {
-                        foreach (var file in Directory.GetFiles(Path.Combine(directory, "source", sd.ResourceType, "invariant-tests"), $"*.xml")
-                            .Union(Directory.GetFiles(Path.Combine(directory, "source", sd.ResourceType, "invariant-tests"), $"*.json")))
-                        {
-                            string key = Path.GetFileNameWithoutExtension(file);
-                            TestExampleForInvariants(sd, directory, file, skipFiles, fpc, !key.EndsWith(".fail"));
-                        }
-                    }
-                }
-                catch
-                {
-                }
+                ScanExamplesForStructureDefinition(resourceType, sd, directory, skipFiles, fpc, monitorFileChanges);
             }
 
             Console.WriteLine("");
@@ -117,15 +80,116 @@ namespace fhir_invariant_tester
                 if (!string.IsNullOrEmpty(resourceType) && sd.ResourceType != resourceType)
                     continue; // commandline has filtered out this resource type
                 if (sd.IsDataType) continue;
-                foreach (var inv in sd.Invariants)
+                ReportSdInvariantStats(sd);
+            }
+
+            // Now that we're all done, lets do a file changes monitor...
+            Console.WriteLine();
+            Console.WriteLine("---------------------------------------------------------------");
+            Console.WriteLine($"Tracking...");
+            Console.WriteLine("---------------------------------------------------------------");
+            System.IO.FileSystemWatcher fsw = new FileSystemWatcher(directory);
+            fsw.NotifyFilter = NotifyFilters.Size;
+            fsw.IncludeSubdirectories = true;
+            fsw.Renamed += (object sender, RenamedEventArgs e) => 
+            {
+                if (monitorFileChanges.ContainsKey(e.OldName))
+                    Console.WriteLine($"   Reprocess {e.OldName} => {e.Name}");
+            };
+            DateTime? lastChangeTimestamp = null;
+            fsw.Changed += (object sender, FileSystemEventArgs e) => 
+            {
+                if (monitorFileChanges.ContainsKey(e.Name))
                 {
-                    if (inv.errorCount > 0)
-                        Console.ForegroundColor = ConsoleColor.Red;
-                    Console.WriteLine($"  {sd.ResourceType}\t\t{inv.key}({inv.severity})\t{inv.successCount}/{inv.failCount}/{inv.errorCount}\t\t{(sd.IsProfile ? $"(profile - {sd.CanonicalUrl})" : "")}");
-                    Console.ForegroundColor = ConsoleColor.White;
+                    if (lastChangeTimestamp == new FileInfo(e.FullPath).LastWriteTimeUtc)
+                        return;
+                    lastChangeTimestamp = new FileInfo(e.FullPath).LastWriteTimeUtc;
+                    Console.WriteLine($"   Reprocess {e.Name} {e.ChangeType}");
+                    var sd = monitorFileChanges[e.Name];
+                    sd.ResetStats();
+                    ScanExamplesForStructureDefinition(resourceType, sd, directory, skipFiles, fpc, monitorFileChanges);
+                    ReportSdInvariantStats(sd);
+                }
+            };
+            fsw.EnableRaisingEvents = true;
+            do
+            {
+                fsw.WaitForChanged(WatcherChangeTypes.All);
+            } while (true);
+            return 0;
+        }
+
+        private static void ReportSdInvariantStats(StructureDefinitionSkeleton sd)
+        {
+            foreach (var inv in sd.Invariants)
+            {
+                if (inv.errorCount > 0)
+                    Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine($"  {sd.ResourceType}\t\t{inv.key}({inv.severity})\t{inv.successCount}/{inv.failCount}/{inv.errorCount}\t\t{(sd.IsProfile ? $"(profile - {sd.CanonicalUrl})" : "")}");
+                Console.ForegroundColor = ConsoleColor.White;
+            }
+        }
+
+        private static void ScanExamplesForStructureDefinition(string resourceType, StructureDefinitionSkeleton sd, string directory, string[] skipFiles, FhirPathCompiler fpc, Dictionary<string, StructureDefinitionSkeleton> monitorFileChanges)
+        {
+            if (!string.IsNullOrEmpty(resourceType) && sd.ResourceType != resourceType)
+                return; // commandline has filtered out this resource type
+            if (sd.IsDataType)
+                return; // no checking of datatype level invariants at this stage
+
+            if (!sd.Invariants.Any())
+                return; // no point checking for test examples if there are no invariants
+            try
+            {
+                foreach (var file in Directory.GetFiles(Path.Combine(directory, "source", sd.ResourceType), $"{sd.ResourceType.ToLower()}-*.xml"))
+                {
+                    // skip some files
+                    if (file.Contains("Archive"))
+                        continue;
+                    if (file.Contains("-examples-header"))
+                        continue;
+                    if (file.Contains("-introduction"))
+                        continue;
+                    if (file.Contains("-notes"))
+                        continue;
+                    if (file.Contains("-search-params.xml"))
+                        continue; // These have some issues due to no type property value (or if there missing other values - fullURL mostly)
+
+                    TestExampleForInvariants(sd, directory, file, skipFiles, fpc, true);
+                    string briefPath = file.Replace(directory, null).Substring(1);
+                    if (!monitorFileChanges.ContainsKey(briefPath))
+                        monitorFileChanges.Add(briefPath, sd);
+                }
+
+                // Now scan for any test files in the examples folder (unit test resources)
+                string invariantTestFolder = Path.Combine(directory, "source", sd.ResourceType, "invariant-tests");
+                if (!Path.Exists(invariantTestFolder)&& !string.IsNullOrEmpty(resourceType))
+                {
+                    // there's no folder, so lets create one and copy some tests in there
+                    Directory.CreateDirectory(invariantTestFolder);
+                    string defaultExampleFile = Path.Combine(directory, "source", sd.ResourceType, $"{sd.ResourceType.ToLower()}-example.xml");
+                    if (File.Exists(defaultExampleFile))
+                    {
+                        foreach (var inv in sd.Invariants)
+                            File.Copy(defaultExampleFile, Path.Combine(invariantTestFolder, $"{inv.key}.f1.fail.xml"));
+                    }
+                }
+                if (Path.Exists(Path.Combine(directory, "source", sd.ResourceType, "invariant-tests")))
+                {
+                    foreach (var file in Directory.GetFiles(Path.Combine(directory, "source", sd.ResourceType, "invariant-tests"), $"*.xml")
+                        .Union(Directory.GetFiles(Path.Combine(directory, "source", sd.ResourceType, "invariant-tests"), $"*.json")))
+                    {
+                        string key = Path.GetFileNameWithoutExtension(file);
+                        TestExampleForInvariants(sd, directory, file, skipFiles, fpc, !key.EndsWith(".fail"));
+                        string briefPath = file.Replace(directory, null).Substring(1);
+                        if (!monitorFileChanges.ContainsKey(briefPath))
+                            monitorFileChanges.Add(briefPath, sd);
+                    }
                 }
             }
-            return 0;
+            catch
+            {
+            }
         }
 
         private static ITypedElement FakeResolver(string reference, ISourceNode root)

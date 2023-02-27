@@ -10,6 +10,16 @@ namespace fhir_invariant_tester
         public bool IsDataType { get; set; }
 
         public List<InvariantSkeleton> Invariants { get; } = new List<InvariantSkeleton>();
+
+        public void ResetStats()
+        {
+            foreach (var inv in Invariants)
+            {
+                inv.successCount = 0;
+                inv.failCount = 0;
+                inv.errorCount = 0;
+            }
+        }
     }
 
     internal class InvariantSkeleton
