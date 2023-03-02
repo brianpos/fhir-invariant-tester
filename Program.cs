@@ -5,7 +5,6 @@ using Hl7.Fhir.Specification;
 using Hl7.Fhir.Specification.Source;
 using Hl7.FhirPath;
 using Hl7.FhirPath.Expressions;
-using System.IO;
 
 namespace fhir_invariant_tester
 {
@@ -221,6 +220,35 @@ namespace fhir_invariant_tester
 
         private static void ScanAllInvariantsInSpecification(string directory, out List<StructureDefinitionSkeleton> sds, out int totalInvariants)
         {
+            // this dictionary of paths is used to replace an existing context definition
+            // with another expression - this is used to redirect the expressions for the
+            // context of fields that use the definition of another field via contentReference
+            Dictionary<string, string> alternateContextPath = new Dictionary<string, string>();
+            alternateContextPath.Add("Questionnaire.item", "Questionnaire.repeat(item)");
+            alternateContextPath.Add("QuestionnaireResponse.item", "QuestionnaireResponse.repeat(item)");
+            alternateContextPath.Add("StructureMap.group.rule", "StructureMap.group.repeat(rule)");
+            alternateContextPath.Add("CodeSystem.concept", "CodeSystem.repeat(concept)");
+            alternateContextPath.Add("Composition.section", "Composition.repeat(section)");
+            alternateContextPath.Add("ValueSet.expansion.contains", "ValueSet.expansion.repeat(contains)");
+            alternateContextPath.Add("RequestOrchestration.action", "RequestOrchestration.repeat(action)");
+            alternateContextPath.Add("PlanDefinition.action", "PlanDefinition.repeat(action)");
+            alternateContextPath.Add("OperationDefinition.parameter", "OperationDefinition.parameter | OperationDefinition.parameter.repeat(part)");
+            alternateContextPath.Add("Parameters.parameter", "Parameters.parameter | Parameters.parameter.repeat(part)");
+            alternateContextPath.Add("ImplementationGuide.definition.page", "ImplementationGuide.definition.repeat(page)");
+
+            // Not sure about these context re-mappings
+            alternateContextPath.Add("ValueSet.compose.include", "ValueSet.compose.include | ValueSet.compose.exclude");
+            alternateContextPath.Add("ValueSet.compose.include.concept.designation", "ValueSet.compose.include.concept.designation | ValueSet.expansion.contains.designation");
+            alternateContextPath.Add("Provenance.agent", "Provenance.agent | Provenance.entity.agent");
+            alternateContextPath.Add("Observation.referenceRange", "Observation.referenceRange | Observation.component.referenceRange");
+            alternateContextPath.Add("EvidenceVariable.characteristic", "EvidenceVariable.characteristic | EvidenceVariable.characteristic.definitionByCombination.characteristic");
+            alternateContextPath.Add("ConceptMap.group.element.target.dependsOn", "ConceptMap.group.element.target.dependsOn | ConceptMap.group.element.target.product");
+            alternateContextPath.Add("ExampleScenario.instance.containedInstance", "ExampleScenario.instance.containedInstance | ExampleScenario.process.step.operation.request | ExampleScenario.process.step.operation.response");
+            alternateContextPath.Add("ExampleScenario.process.step", "ExampleScenario.process.step | ExampleScenario.process.step.alternative.step");
+            alternateContextPath.Add("ExampleScenario.process", "ExampleScenario.process | ExampleScenario.process.step.process");
+            alternateContextPath.Add("TestScript.setup.action.assert", "TestScript.setup.action.assert | TestScript.test.action.assert");
+            alternateContextPath.Add("TestScript.setup.action.operation", "TestScript.setup.action.operation | TestScript.test.action.operation | TestScript.teardown.action.operation");
+
             sds = new List<StructureDefinitionSkeleton>();
             totalInvariants = 0;
             var skipFiles = new[] { "Workbook", "div" };
@@ -251,15 +279,18 @@ namespace fhir_invariant_tester
                         // Now scan the SD for it's invariants
                         foreach (var element in node.Children("differential").Children("element"))
                         {
+                            var elementPath = element.Children("path").FirstOrDefault()?.Text;
                             foreach (var constraint in element.Children("constraint"))
                             {
                                 var inv = new InvariantSkeleton()
                                 {
                                     key = constraint.Children("key").FirstOrDefault()?.Text,
                                     severity = constraint.Children("severity").FirstOrDefault()?.Text,
-                                    context = element.Children("path").FirstOrDefault()?.Text,
+                                    context = elementPath,
                                     expression = constraint.Children("expression").FirstOrDefault()?.Text
                                 };
+                                if (alternateContextPath.ContainsKey(elementPath))
+                                    inv.context = alternateContextPath[elementPath];
                                 sd.Invariants.Add(inv);
                                 //if (string.IsNullOrEmpty(inv.expression))
                                 //    Console.ForegroundColor = ConsoleColor.Red;
@@ -267,6 +298,29 @@ namespace fhir_invariant_tester
                                 //if (string.IsNullOrEmpty(inv.expression))
                                 //    Console.ForegroundColor = ConsoleColor.White;
                                 totalInvariants++;
+                            }
+
+                            // Now check if there is a context that uses this type too
+                            var contentReference = element.Children("contentReference").FirstOrDefault()?.Text;
+                            if (!string.IsNullOrEmpty(contentReference) && sd.Invariants.Any() && !alternateContextPath.ContainsKey(contentReference.Substring(1)))
+                            {
+                                // scan to find any invariants with the referenced type
+                                Console.ForegroundColor = ConsoleColor.Green;
+                                Console.WriteLine($"     Dependent Type: {sd.ResourceType} {element.Children("path").FirstOrDefault()?.Text} uses path {contentReference}");
+                                
+                                foreach (var inv in sd.Invariants)
+                                {
+                                    if (inv.context.StartsWith(contentReference.Substring(1)))
+                                    {
+                                        Console.WriteLine($"       impacts {inv.key}");
+
+                                        if (elementPath.StartsWith(inv.context))
+                                        {
+                                            Console.WriteLine($"       impacts {inv.key} nested!");
+                                        }
+                                    }
+                                }
+                                Console.ForegroundColor = ConsoleColor.White;
                             }
                         }
                     }
