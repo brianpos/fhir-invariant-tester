@@ -104,7 +104,9 @@ namespace fhir_invariant_tester
                     if (lastChangeTimestamp == new FileInfo(e.FullPath).LastWriteTimeUtc)
                         return;
                     lastChangeTimestamp = new FileInfo(e.FullPath).LastWriteTimeUtc;
-                    Console.WriteLine($"   Reprocess {e.Name} {e.ChangeType}");
+                    Thread.Sleep(100);// sleep a little to give the writer time to complete
+                    Console.WriteLine("---------------------------------------------------------------");
+                    Console.WriteLine($"Detected change to: {e.Name} {e.ChangeType}");
                     var sd = monitorFileChanges[e.Name];
                     sd.ResetStats();
                     ScanExamplesForStructureDefinition(resourceType, sd, directory, skipFiles, fpc, monitorFileChanges);
@@ -187,8 +189,11 @@ namespace fhir_invariant_tester
                     }
                 }
             }
-            catch
+            catch(Exception ex)
             {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine($"  Huh? {ex.Message}");
+                Console.ForegroundColor = ConsoleColor.White;
             }
         }
 
@@ -275,7 +280,24 @@ namespace fhir_invariant_tester
 
         private static void TestExampleForInvariants(StructureDefinitionSkeleton sd, string directory, string file, string[] skipFiles, FhirPathCompiler fpc, bool expectSuccess)
         {
-            var content = File.ReadAllText(file);
+            string content = null;
+            try
+            {
+                using (var stream = File.Open(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                using (var sr = new StreamReader(stream))
+                {
+                    content = sr.ReadToEnd();
+                }
+                //content = File.ReadAllText(file);
+            }
+            catch (Exception ex)
+            {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine($"  Failed to read the example file {file}");
+                Console.WriteLine($"     {ex.Message}");
+                Console.ForegroundColor = ConsoleColor.White;
+                return;
+            }
             if (!string.IsNullOrEmpty(content))
             {
                 try
@@ -400,9 +422,11 @@ namespace fhir_invariant_tester
                         }
                     }
                 }
-                catch (FormatException)
+                catch (FormatException ex)
                 {
-                    Console.WriteLine($"nope... {file.Replace(directory, "")}");
+                    Console.ForegroundColor = ConsoleColor.Red;
+                    Console.WriteLine($"nope... {file.Replace(directory, "")} {ex.Message}");
+                    Console.ForegroundColor = ConsoleColor.White;
                 }
             }
         }
