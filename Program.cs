@@ -1,16 +1,19 @@
 ﻿using Hl7.Fhir.ElementModel;
 using Hl7.Fhir.FhirPath;
+using Hl7.Fhir.Model;
 using Hl7.Fhir.Serialization;
 using Hl7.Fhir.Specification;
 using Hl7.Fhir.Specification.Source;
 using Hl7.FhirPath;
 using Hl7.FhirPath.Expressions;
+using System.Linq;
 
 namespace fhir_invariant_tester
 {
     internal class Program
     {
         static IStructureDefinitionSummaryProvider _provider;
+        static CachedResolver _cacheResolver;
         static int Main(string[] args)
         {
             Console.WriteLine("FHIR R5 Invariant tester!");
@@ -58,8 +61,8 @@ namespace fhir_invariant_tester
             }
             FhirPathCompiler fpc = new FhirPathCompiler(symbols);
 
-            var source = new CachedResolver(new SpecSourceStructureDefinitionResolver(sds));
-            _provider = new Hl7.Fhir.Specification.StructureDefinitionSummaryProvider(source);
+            _cacheResolver = new CachedResolver(new SpecSourceStructureDefinitionResolver(sds));
+            _provider = new Hl7.Fhir.Specification.StructureDefinitionSummaryProvider(_cacheResolver);
 
             // Parse all the files directly in the source folder of each resource type (known succeeding resources).
             var skipFiles = new[] { "Workbook", "div" };
@@ -155,6 +158,13 @@ namespace fhir_invariant_tester
                         continue;
                     if (file.Contains("-search-params.xml"))
                         continue; // These have some issues due to no type property value (or if there missing other values - fullURL mostly)
+                    // Other known invalid files to skip
+                    if (file.Contains("patient-examples-cypress-template.xml"))
+                        continue;
+                    if (file.Contains("testscript-ats.xml"))
+                        continue;
+                    if (file.Contains("diagnosticreport-examples-lab-text.xml"))
+                        continue;
 
                     TestExampleForInvariants(sd, directory, file, skipFiles, fpc, true);
                     string briefPath = file.Replace(directory, null).Substring(1);
@@ -388,6 +398,42 @@ namespace fhir_invariant_tester
                     var context = new FhirEvaluationContext(te);
                     context.ElementResolver = (string reference) => FakeResolver(reference, node);
 
+                    // Before we do anything with it, lets validate with the firely validator
+                    var settings = new Hl7.Fhir.Validation.ValidationSettings()
+                    {
+                        ResourceResolver = _cacheResolver,
+                        TerminologyService = new FakeTerminologyService(), //new Hl7.Fhir.Specification.Terminology.LocalTerminologyService(AsyncSource, new Hl7.Fhir.Specification.Terminology.ValueSetExpanderSettings() { MaxExpansionSize = 1500 }),
+                        FhirPathCompiler = fpc,
+                        ConstraintsToIgnore = new string[] { },
+                        SkipConstraintValidation = true
+                    };
+                    var validator = new Hl7.Fhir.Validation.Validator(settings);
+                    var outcome = validator.Validate(te);
+                    // Ignore any errors and warnings from the validator
+                    outcome.Issue.RemoveAll(t => t.Severity == OperationOutcome.IssueSeverity.Warning || t.Severity == OperationOutcome.IssueSeverity.Information);
+                    outcome.Issue.RemoveAll(t => t.Severity == OperationOutcome.IssueSeverity.Error && t.Code ==  OperationOutcome.IssueType.Informational);
+                    // Ignore any can't resolve profile messages too
+                    outcome.Issue.RemoveAll(t => t.Severity == OperationOutcome.IssueSeverity.Error
+                                                && t.Code == OperationOutcome.IssueType.Invalid
+                                                && t.Details?.Text?.Contains("which is not a known FHIR core type") == true);
+                    // And another biproduct of this is error 1003
+                    outcome.Issue.RemoveAll(t => t.Severity == OperationOutcome.IssueSeverity.Error
+                                                && t.Code == OperationOutcome.IssueType.Incomplete
+                                                && t.Details?.Coding?.Any(c => c.Code == "4000") == true);
+                    outcome.Issue.RemoveAll(t => t.Severity == OperationOutcome.IssueSeverity.Error
+                                                && t.Code == OperationOutcome.IssueType.Invalid
+                                                && t.Details?.Coding?.Any(c => c.Code == "1003") == true);
+                    // and for whatever reason any internal errors (can't help those at this point)
+                    outcome.Issue.RemoveAll(t => t.Severity == OperationOutcome.IssueSeverity.Fatal && t.Details?.Coding?.Any(c => c.Code == "5003") == true);
+                    if (!outcome.Success)
+                    {
+                        Console.ForegroundColor = ConsoleColor.Red;
+                        Console.WriteLine($"  Validation Err: {file}");
+                        Console.WriteLine(outcome.ToXml(new FhirXmlSerializationSettings() { Pretty = true }));
+                        Console.ForegroundColor = ConsoleColor.White;
+                    }
+
+                    // Now do the actual invariant testing
                     string key = Path.GetFileNameWithoutExtension(file);
                     bool specificInvariantTest = (key.EndsWith("fail") || key.EndsWith("pass")) && sd.Invariants.Any(i => key.StartsWith(i.key));
 
