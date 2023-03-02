@@ -291,6 +291,18 @@ namespace fhir_invariant_tester
                                 };
                                 if (alternateContextPath.ContainsKey(elementPath))
                                     inv.context = alternateContextPath[elementPath];
+                                else
+                                {
+                                    // Check if any of the keys are a prefix in the context
+                                    foreach (var kvp in alternateContextPath)
+                                    {
+                                        if (elementPath.StartsWith(kvp.Key+"."))
+                                        {
+                                            inv.context = elementPath.Replace(kvp.Key + ".", $"({alternateContextPath[kvp.Key]}).");
+                                            break;
+                                        }
+                                    }
+                                }
                                 sd.Invariants.Add(inv);
                                 //if (string.IsNullOrEmpty(inv.expression))
                                 //    Console.ForegroundColor = ConsoleColor.Red;
