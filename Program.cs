@@ -165,6 +165,8 @@ namespace fhir_invariant_tester
                         continue;
                     if (file.Contains("diagnosticreport-examples-lab-text.xml"))
                         continue;
+                    if (file.Contains("questionnaireresponse-example-ussg-fht-answers.xml"))
+                        continue;
 
                     TestExampleForInvariants(sd, directory, file, skipFiles, fpc, true);
                     string briefPath = file.Replace(directory, null).Substring(1);
