@@ -31,7 +31,7 @@ namespace fhir_invariant_tester
             }
 
             // Scan over all the files in the specification folder (arg[0]) to find all the Profile definitions.
-            string directory = args[0];
+            string directory = args[0].TrimEnd('\\').TrimEnd('/');
             string resourceType = null;
             Console.WriteLine($"Testing FHIR source folder:\t{directory}");
             if (args.Length > 1)
@@ -166,6 +166,8 @@ namespace fhir_invariant_tester
                     if (file.Contains("diagnosticreport-examples-lab-text.xml"))
                         continue;
                     if (file.Contains("questionnaireresponse-example-ussg-fht-answers.xml"))
+                        continue;
+                    if (file.EndsWith("-exceptions.xml"))
                         continue;
 
                     TestExampleForInvariants(sd, directory, file, skipFiles, fpc, true);
