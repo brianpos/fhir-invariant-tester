@@ -439,12 +439,12 @@ namespace fhir_invariant_tester
 
                     // Now do the actual invariant testing
                     string key = Path.GetFileNameWithoutExtension(file);
-                    bool specificInvariantTest = (key.EndsWith("fail") || key.EndsWith("pass")) && sd.Invariants.Any(i => key.StartsWith(i.key));
+                    bool specificInvariantTest = (key.EndsWith("fail") || key.EndsWith("pass")) && sd.Invariants.Any(i => key.StartsWith(i.key+"."));
 
                     // Now test each of the invariants on the resource
                     foreach (var inv in sd.Invariants)
                     {
-                        if (specificInvariantTest && !key.StartsWith(inv.key))
+                        if (specificInvariantTest && !key.StartsWith(inv.key + "."))
                             continue;
                         try
                         {
