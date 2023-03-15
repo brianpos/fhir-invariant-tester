@@ -384,9 +384,9 @@ namespace fhir_invariant_tester
                 {
                     ISourceNode node;
                     if (file.EndsWith(".xml"))
-                        node = FhirXmlNode.Parse(content);
+                        node = FhirXmlNode.Parse(content, new FhirXmlParsingSettings { PermissiveParsing = false });
                     else
-                        node = FhirJsonNode.Parse(content);
+                        node = FhirJsonNode.Parse(content, null, new FhirJsonParsingSettings { PermissiveParsing = false });
                     if (skipFiles.Contains(node.Name))
                         return;
 
