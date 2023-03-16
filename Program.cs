@@ -455,7 +455,7 @@ namespace fhir_invariant_tester
                             }
                             else
                             {
-                                var exprContext = fpc.Compile(inv.context);
+                                var exprContext = fpc.Compile(inv.context.Replace("[x]", ""));
                                 contexts.AddRange(exprContext(te, context));
                             }
 
